@@ -101,7 +101,7 @@ func (h AnalysisHandler) AddRoutes(e *gin.Engine) {
 	routeGroup.POST(AppAnalysesRoot, Transaction, h.AppCreate)
 	routeGroup.GET(AppAnalysesRoot, h.AppList)
 	routeGroup.GET(AppAnalysisRoot, h.AppLatest)
-	routeGroup.GET(AppAnalysisReportRoot, h.AppLatestReport)
+	routeGroup.GET(AppAnalysisReportRoot, h.AppLatestReports)
 	routeGroup.GET(AppAnalysisDepsRoot, h.AppDeps)
 	routeGroup.GET(AppAnalysisIssuesRoot, h.AppIssues)
 }
@@ -254,19 +254,74 @@ func (h AnalysisHandler) Archive(ctx *gin.Context) {
 // @success 200
 // @router /applications/{id}/analysis/report [get]
 // @param id path int true "Application ID"
-func (h AnalysisHandler) AppLatestReport(ctx *gin.Context) {
-	id := h.pk(ctx)
-	m := &model.Analysis{}
-	db := h.DB(ctx)
-	db = db.Where("ApplicationID", id)
-	err := db.Last(&m).Error
-	if err != nil {
-		_ = ctx.Error(err)
+// func (h AnalysisHandler) AppLatestReport(ctx *gin.Context) {
+// 	id := h.pk(ctx)
+// 	m := &model.Analysis{}
+// 	db := h.DB(ctx)
+// 	db = db.Where("ApplicationID", id)
+// 	err := db.Last(&m).Error
+// 	if err != nil { 
+// 		_ = ctx.Error(err)
+// 		return
+// 	}
+// 	reportWriter := ReportWriter{ctx: ctx}
+// 	reportWriter.Write(m.ID)
+// }
+
+
+// AppLatestReports godoc
+// @summary Get the latest analysis (static) reports for multiple applications.
+// @description Get the latest analysis (static) reports for multiple applications.
+// @tags analyses
+// @produce octet-stream
+// @success 200
+// @router /applications/analyses/reports [get]
+// @param ids query string true "Pipe-separated Application IDs, e.g., (1|2|3)"
+func (h AnalysisHandler) AppLatestReports(ctx *gin.Context) {
+	// קבלת המחרוזת של מזהים, למשל "(1|2|3)"
+	idParam := ctx.Query("ids")
+	idParam = strings.Trim(idParam, "()") // הסרת סוגריים אם ישנם
+
+	// פיצול המחרוזת למערך של מחרוזות לפי התו '|'
+	idStrings := strings.Split(idParam, "|")
+
+	// המרת המחרוזות למספרים שלמים
+	var ids []int
+	for _, idStr := range idStrings {
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			_ = ctx.Error(fmt.Errorf("invalid ID: %s", idStr))
+			return
+		}
+		ids = append(ids, id)
+	}
+
+	// אם אין מזהים שנשלחו
+	if len(ids) == 0 {
+		_ = ctx.Error(errors.New("no application IDs provided"))
 		return
 	}
-	reportWriter := ReportWriter{ctx: ctx}
-	reportWriter.Write(m.ID)
+	
+	// יצירת מפה לאחסון הדוחות לפי מזהה
+	reports := make(map[int]interface{})
+	for _, id := range ids {
+		m := &model.Analysis{}
+		db := h.DB(ctx)
+		db = db.Where("ApplicationID", id)
+		err := db.Last(&m).Error
+		if err != nil {
+			reports[id] = "Not found or error"
+			continue
+		}
+		reportWriter := ReportWriter{ctx: ctx}
+		reportWriter.Write(m.ID)
+		reports[id] = m
+	}
+	
+	// תגובה עם כל התוצאות
+	h.Respond(ctx, http.StatusOK, reports)
 }
+
 
 // AppList godoc
 // @summary List analyses.
